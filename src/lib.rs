@@ -9,7 +9,7 @@
 //! use extobj::{extobj, ExtObj};
 //!
 //! // 1. Declare the extension object type.
-//! extobj!(struct Player);
+//! extobj!(pub struct Player);
 //!
 //! // 2. In any downstream crate add fields.
 //! extobj!(impl Player {

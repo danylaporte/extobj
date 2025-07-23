@@ -16,15 +16,16 @@ struct Input {
     kw_struct: Option<Span>, // span of the `struct` token if present
     name: Ident,
     fields: Vec<(Visibility, Ident, Type)>,
+    vis: Visibility,
 }
 
 impl Parse for Input {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         // Parse optional helper attribute(s) first
         let attrs = input.call(Attribute::parse_outer)?;
+        let vis: Visibility = input.parse()?;
 
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Token![struct]) {
+        if input.peek(Token![struct]) {
             let kw_struct: Token![struct] = input.parse()?;
             let name = input.parse()?;
             Ok(Input {
@@ -32,6 +33,7 @@ impl Parse for Input {
                 kw_struct: Some(kw_struct.span),
                 name,
                 fields: Vec::new(),
+                vis,
             })
         } else {
             let _: Token![impl] = input.parse()?;
@@ -52,6 +54,7 @@ impl Parse for Input {
                 kw_struct: None,
                 name,
                 fields,
+                vis: Visibility::Inherited,
             })
         }
     }
@@ -92,7 +95,7 @@ fn crate_path(attrs: &[Attribute]) -> syn::Result<Ident> {
 /// ```
 /// // Custom crate name
 /// #[extobj(crate = my_renamed)]
-/// extobj!(struct OtherObj);
+/// extobj!(pub struct OtherObj);
 /// #[extobj(crate = my_renamed)]
 /// extobj!(impl OtherObj { pub flag: bool });
 /// ```
@@ -103,6 +106,7 @@ pub fn extobj(input: TokenStream) -> TokenStream {
         kw_struct,
         name,
         fields,
+        vis, 
     } = parse_macro_input!(input as Input);
 
     // Determine the crate name to use in the generated code
@@ -115,7 +119,7 @@ pub fn extobj(input: TokenStream) -> TokenStream {
         // `extobj!(struct Name);`
         quote! {
             #[derive(Copy, Clone)]
-            pub struct #name;
+            #vis struct #name;
 
             impl #extobj::__ExtObjDef for #name {
                 #[inline(always)]

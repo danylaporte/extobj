@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Minimal sanity
 
-extobj!(struct TestObj);
+extobj!(pub struct TestObj);
 
 extobj!(impl TestObj {
     FOO: i32,
