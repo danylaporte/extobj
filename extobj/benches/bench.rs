@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use extobj::{extobj, ExtObj};
+use criterion::{Criterion, criterion_group, criterion_main};
+use extobj::{ExtObj, extobj};
 use std::hint::black_box;
 
 fn ext_obj_benchmark(c: &mut Criterion) {

@@ -1,4 +1,4 @@
-use extobj::{extobj, ExtObj};
+use extobj::{ExtObj, extobj};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Minimal sanity

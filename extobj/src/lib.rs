@@ -196,5 +196,7 @@ unsafe fn init_default<T: Default>() -> usize {
 }
 
 unsafe fn dropper<T>(ptr: usize) {
-    drop(Box::from_raw(ptr as *mut T));
+    unsafe {
+        drop(Box::from_raw(ptr as *mut T));
+    }
 }

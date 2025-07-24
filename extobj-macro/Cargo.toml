@@ -1,7 +1,7 @@
 [package]
 name = "extobj-macro"
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 description = "Zero-cost, cross-crate extensible objects"
 repository = "https://github.com/danylaporte/extobj"
 license = "MIT OR Apache-2.0"

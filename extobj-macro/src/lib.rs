@@ -2,8 +2,9 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
+    Expr, Ident, Path, Token, Type, Visibility,
     parse::{Parse, ParseStream},
-    parse_macro_input, Expr, Ident, Path, Token, Type, Visibility,
+    parse_macro_input,
 };
 
 /// Top-level input: either
