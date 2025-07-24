@@ -1,21 +1,3 @@
-[package]
-name = "extobj"
-version = "0.2.1"
-edition = "2021"
-description = "Zero-cost, cross-crate extensible objects"
-repository = "https://github.com/danylaporte/extobj"
-license = "MIT OR Apache-2.0"
-keywords = ["extensible", "macro", "data"]
-categories = ["rust-patterns"]
-publish = false
-
-[dependencies]
-ctor = "0.4"
-extobj-macro = { path = "./extobj-macro" }
-
-[dev-dependencies]
-criterion = "0.6"
-
-[[bench]]
-name = "bench"
-harness = false
+[workspace]
+members = ["extobj", "extobj-macro"]
+resolver = "2"

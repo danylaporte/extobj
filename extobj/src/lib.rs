@@ -24,6 +24,7 @@
 //! assert_eq!(p[*health], 100);
 //! ```
 //!
+//!
 //! ## How it works
 //!
 //! Every field becomes a `static Var<Player, T>` singleton.  
@@ -35,8 +36,19 @@
 //! ## Optional crate rename
 //!
 //! ```
-//! //! #[extobj(crate = extobj)]
+//! extobj::extobj!(struct Foo, crate_path = extobj);
+//! extobj::extobj!(impl Foo { M: u8 }, crate_path = extobj);
+//! ```
+//!
+//! ## Optional init code
+//!
+//! ```
 //! extobj::extobj!(struct Foo);
+//! extobj::extobj!(impl Foo { M: u8 }, init = register_deps());
+//!
+//! fn register_deps() {
+//!     // do some init code here.
+//! }
 //! ```
 //!
 //! ## Cargo features
@@ -186,30 +198,3 @@ unsafe fn init_default<T: Default>() -> usize {
 unsafe fn dropper<T>(ptr: usize) {
     drop(Box::from_raw(ptr as *mut T));
 }
-
-// #[macro_export]
-// macro_rules! extobj {
-//     ($vis:vis struct $name:ident) => {
-//         $vis struct $name;
-
-//         impl $crate::__ExtObjDef for $name {
-//             #[inline(always)]
-//             fn defs() -> &'static $crate::Defs {
-//                 static DEFS: $crate::Defs = std::sync::RwLock::new(Vec::new());
-//                 &DEFS
-//             }
-//         }
-//     };
-
-//     (impl $ext_obj:ty {
-//         $($vis:vis $prop_name:ident: $prop_ty:ty),*
-//         $(,)?
-//     }) => {
-//         $(
-//             #[$crate::ctor::ctor(crate_path = $crate::ctor)]
-//             $vis static $prop_name: $crate::Var<$ext_obj, $prop_ty> = {
-//                 $crate::Var::<$ext_obj, $prop_ty>::__new()
-//             };
-//         )*
-//     };
-// }

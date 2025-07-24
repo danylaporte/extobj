@@ -58,8 +58,7 @@ No recompilation of game_core is required.
 If you re-export extobj under a different name, tell the macro:
 
 ```rust
-#[extobj(crate = "my_reexport")]
-extobj!(struct Foo);
+extobj!(struct Foo, crate_path = my_reexport);
 ```
 
 ### License

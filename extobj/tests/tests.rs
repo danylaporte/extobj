@@ -116,3 +116,9 @@ fn concurrent_access() {
     let total = o.read().unwrap()[*COUNTER].load(Ordering::Relaxed);
     assert_eq!(total, 0 + 1 + 2 + 3);
 }
+
+mod inside_another_mod {
+    super::extobj!(pub(super) struct Insider);
+}
+
+extobj!(impl inside_another_mod::Insider { InsiderID: u32 });
