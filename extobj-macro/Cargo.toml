@@ -2,6 +2,12 @@
 name = "extobj-macro"
 version = "0.1.0"
 edition = "2021"
+description = "Zero-cost, cross-crate extensible objects"
+repository = "https://github.com/danylaporte/extobj"
+license = "MIT OR Apache-2.0"
+keywords = ["extensible", "macro", "data"]
+categories = ["rust-patterns"]
+publish = false
 
 [lib]
 proc-macro = true
