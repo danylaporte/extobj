@@ -58,10 +58,16 @@
 #![warn(missing_docs)]
 #![allow(non_camel_case_types)] // used by the macro-generated marker types
 
+mod dynobj;
+
 pub use ctor;
+pub use dynobj::DynObj;
 pub use extobj_macro::extobj;
 use std::{
-    hash::{Hash, Hasher}, marker::PhantomData, ops::{Index, IndexMut}, fmt::{Debug, Formatter, self},
+    fmt::{self, Debug, Formatter},
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+    ops::{Index, IndexMut},
 };
 
 #[doc(hidden)]
@@ -153,7 +159,7 @@ impl<O: __ExtObjDef, T> IndexMut<Var<O, T>> for ExtObj<O> {
 pub struct Var<O, T>(usize, PhantomData<(O, T)>);
 
 impl<O, T> Var<O, T> {
-    /// Erase the type of the variable and extract the information representing this 
+    /// Erase the type of the variable and extract the information representing this
     /// variable in the extobj type.
     #[inline]
     pub fn var_id(self) -> VarId<O> {
@@ -261,4 +267,3 @@ impl<O, T> PartialEq<VarId<O>> for Var<O, T> {
         self.0 == other.0
     }
 }
-
