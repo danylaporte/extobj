@@ -61,9 +61,7 @@
 pub use ctor;
 pub use extobj_macro::extobj;
 use std::{
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    ops::{Index, IndexMut},
+    hash::{Hash, Hasher}, marker::PhantomData, ops::{Index, IndexMut}, fmt::{Debug, Formatter, self},
 };
 
 #[doc(hidden)]
@@ -154,6 +152,15 @@ impl<O: __ExtObjDef, T> IndexMut<Var<O, T>> for ExtObj<O> {
 #[repr(transparent)]
 pub struct Var<O, T>(usize, PhantomData<(O, T)>);
 
+impl<O, T> Var<O, T> {
+    /// Erase the type of the variable and extract the information representing this 
+    /// variable in the extobj type.
+    #[inline]
+    pub fn var_id(self) -> VarId<O> {
+        VarId(self.0, PhantomData)
+    }
+}
+
 impl<O, T> Clone for Var<O, T> {
     #[inline]
     fn clone(&self) -> Self {
@@ -162,6 +169,12 @@ impl<O, T> Clone for Var<O, T> {
 }
 
 impl<O, T> Copy for Var<O, T> {}
+
+impl<O, T> Debug for Var<O, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Var").field(&self.0).finish()
+    }
+}
 
 impl<O, T> Eq for Var<O, T> {}
 
@@ -200,3 +213,52 @@ unsafe fn dropper<T>(ptr: usize) {
         drop(Box::from_raw(ptr as *mut T));
     }
 }
+
+/// The variable identifier inside the extobj. This can be hashed.
+pub struct VarId<O>(usize, PhantomData<O>);
+
+impl<O> Clone for VarId<O> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<O> Copy for VarId<O> {}
+
+impl<O> Debug for VarId<O> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("VarId").field(&self.0).finish()
+    }
+}
+
+impl<O> Eq for VarId<O> {}
+
+impl<O> Hash for VarId<O> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<O> PartialEq for VarId<O> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<O, T> PartialEq<Var<O, T>> for VarId<O> {
+    #[inline]
+    fn eq(&self, other: &Var<O, T>) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<O, T> PartialEq<VarId<O>> for Var<O, T> {
+    #[inline]
+    fn eq(&self, other: &VarId<O>) -> bool {
+        self.0 == other.0
+    }
+}
+
