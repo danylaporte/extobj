@@ -1,4 +1,4 @@
-use extobj::{ExtObj, extobj};
+use extobj::{ExtObj, RwLock, extobj};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Minimal sanity
@@ -99,13 +99,13 @@ fn ext_obj_is_default() {
 fn concurrent_access() {
     use std::thread;
 
-    let o = std::sync::Arc::new(std::sync::RwLock::new(ExtObj::<TestObj>::new()));
+    let o = std::sync::Arc::new(RwLock::new(ExtObj::<TestObj>::new()));
 
     let mut handles = vec![];
     for i in 0..4 {
         let o = o.clone();
         handles.push(thread::spawn(move || {
-            let g = o.write().unwrap();
+            let g = o.write();
             g[*COUNTER].fetch_add(i, Ordering::Relaxed);
         }));
     }
@@ -113,7 +113,7 @@ fn concurrent_access() {
         h.join().unwrap();
     }
 
-    let total = o.read().unwrap()[*COUNTER].load(Ordering::Relaxed);
+    let total = o.read()[*COUNTER].load(Ordering::Relaxed);
     assert_eq!(total, 0 + 1 + 2 + 3);
 }
 

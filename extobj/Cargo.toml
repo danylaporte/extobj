@@ -10,11 +10,12 @@ categories = ["rust-patterns"]
 publish = false
 
 [dependencies]
-ctor = "0.4"
+ctor = "0.6.1"
 extobj-macro = { path = "../extobj-macro" }
+parking_lot = "0.12"
 
 [dev-dependencies]
-criterion = "0.6"
+criterion = "0.7"
 
 [[bench]]
 name = "bench"

@@ -1,4 +1,4 @@
-use std::{any::TypeId, marker::PhantomData};
+use std::marker::PhantomData;
 
 /// A type-erased, owned value.
 ///
@@ -48,7 +48,7 @@ pub struct DynObj {
     /// * Used to verify that the type `T` provided in `get`, `get_mut`, or `into_inner`
     ///   matches the type used in `new`.
     #[cfg(debug_assertions)]
-    tid: TypeId,
+    tid: std::any::TypeId,
 
     /// Marker to indicate ownership of a heap-allocated value.
     ///
@@ -100,7 +100,7 @@ impl DynObj {
             data: b,            // Store the raw pointer to the heap-allocated value
             drop: dropper::<T>, // Store the type-specific drop function
             #[cfg(debug_assertions)]
-            tid: TypeId::of::<T>(), // Store the TypeId for debug type checking
+            tid: std::any::TypeId::of::<T>(), // Store the TypeId for debug type checking
             _marker: PhantomData, // Initialize the ownership marker
         }
     }
@@ -127,7 +127,11 @@ impl DynObj {
     {
         // Check type safety in debug builds
         #[cfg(debug_assertions)]
-        debug_assert_eq!(self.tid, TypeId::of::<T>(), "Type mismatch in DynObj::get");
+        debug_assert_eq!(
+            self.tid,
+            std::any::TypeId::of::<T>(),
+            "Type mismatch in DynObj::get"
+        );
 
         // Cast the raw pointer to a reference of type `T` and return it
         unsafe { &*(self.data as *const T) }
@@ -157,7 +161,7 @@ impl DynObj {
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             self.tid,
-            TypeId::of::<T>(),
+            std::any::TypeId::of::<T>(),
             "Type mismatch in DynObj::get_mut"
         );
 
@@ -190,7 +194,7 @@ impl DynObj {
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             self.tid,
-            TypeId::of::<T>(),
+            std::any::TypeId::of::<T>(),
             "Type mismatch in DynObj::into_inner"
         );
 

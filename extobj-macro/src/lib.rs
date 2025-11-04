@@ -201,7 +201,7 @@ pub fn extobj(input: TokenStream) -> TokenStream {
             impl #extobj::__ExtObjDef for #name {
                 #[inline(always)]
                 fn defs() -> &'static #extobj::Defs {
-                    static DEFS: #extobj::Defs = ::std::sync::RwLock::new(::std::vec::Vec::new());
+                    static DEFS: #extobj::Defs = #extobj::RwLock::new(::std::vec::Vec::new());
                     &DEFS
                 }
             }
