@@ -1,4 +1,4 @@
-use extobj::{ExtObj, RwLock, extobj};
+use extobj::{DynObj, ExtObj, RwLock, extobj};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Minimal sanity
@@ -122,3 +122,57 @@ mod inside_another_mod {
 }
 
 extobj!(impl inside_another_mod::Insider { InsiderID: u32 });
+
+// DynObj: inline and boxed storage paths
+
+static DYN_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+struct SmallDrop(u8);
+
+impl Drop for SmallDrop {
+    fn drop(&mut self) {
+        DYN_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn dynobj_inline_plain() {
+    let mut o = DynObj::new(0xABu8);
+    unsafe {
+        assert_eq!(*o.get::<u8>(), 0xAB);
+        *o.get_mut::<u8>() = 7;
+        assert_eq!(o.into_inner::<u8>(), 7);
+    }
+
+    let o = DynObj::new(u64::MAX);
+    assert_eq!(unsafe { o.into_inner::<u64>() }, u64::MAX);
+}
+
+#[test]
+fn dynobj_inline_with_drop() {
+    let before = DYN_DROPS.load(Ordering::SeqCst);
+    {
+        let o = DynObj::new(SmallDrop(1));
+        assert_eq!(unsafe { o.get::<SmallDrop>() }.0, 1);
+    }
+    assert_eq!(DYN_DROPS.load(Ordering::SeqCst), before + 1);
+
+    // into_inner must move without running the destructor twice
+    let o = DynObj::new(SmallDrop(2));
+    let v = unsafe { o.into_inner::<SmallDrop>() };
+    assert_eq!(DYN_DROPS.load(Ordering::SeqCst), before + 1);
+    drop(v);
+    assert_eq!(DYN_DROPS.load(Ordering::SeqCst), before + 2);
+}
+
+#[test]
+fn dynobj_boxed() {
+    let mut o = DynObj::new([1u64, 2, 3, 4]);
+    unsafe {
+        o.get_mut::<[u64; 4]>()[0] = 9;
+        assert_eq!(*o.get::<[u64; 4]>(), [9, 2, 3, 4]);
+    }
+
+    let s = DynObj::new(String::from("hello"));
+    assert_eq!(unsafe { s.into_inner::<String>() }, "hello");
+}

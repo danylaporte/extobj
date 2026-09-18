@@ -1,22 +1,37 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    mem::{self, MaybeUninit, align_of, needs_drop, size_of},
+    ptr,
+};
+
+/// Raw storage: either an erased `Box<T>` pointer or, for small `T`, the
+/// value itself stored inline.
+type Slot = MaybeUninit<*mut ()>;
+
+/// `T` is stored inline when it fits in a pointer-sized, pointer-aligned slot.
+/// This is a compile-time constant for every `T`, so the branch on it in
+/// `new`/`get`/`into_inner` folds away.
+#[inline(always)]
+const fn is_inline<T>() -> bool {
+    size_of::<T>() <= size_of::<Slot>() && align_of::<T>() <= align_of::<Slot>()
+}
 
 /// A type-erased, owned value.
 ///
-/// `DynObj` behaves like a `Box<dyn Any>` but is implemented entirely with
-/// raw pointers to avoid storing a v-table, making it more lightweight.
-/// The concrete type is known only at construction time (via `new`) and must
-/// be re-supplied by the caller when accessing the value (via `get`,
-/// `get_mut`, or `into_inner`).
+/// `DynObj` behaves like a `Box<dyn Any>` but stores no v-table.  The
+/// concrete type is known only at construction (`new`) and must be
+/// re-supplied by the caller on access (`get`, `get_mut`, `into_inner`).
+///
+/// Values that fit in a pointer (`u8`..`u64`, `f64`, `bool`, thin pointers,
+/// small enums, ...) are stored **inline** and never touch the heap; larger
+/// values are boxed.  Types without drop glue skip the destructor call.
 ///
 /// # Safety
 ///
-/// * The object must **always** be dropped with the same type `T` that was
-///   used to create it to prevent undefined behavior.
-/// * Accessing the value with the wrong type (e.g., `get::<U>` when the object was
-///   created with `new::<T>`) results in **instant undefined behavior**.
-/// * In `debug_assertions` builds, the actual `TypeId` is stored, and an
-///   assertion will catch mismatched types, but this safety check is **not present**
-///   in release builds to optimize performance.
+/// * Accessing the value with a type other than the one passed to `new`
+///   (e.g. `get::<U>` after `new::<T>`) is **undefined behavior**.
+/// * In `debug_assertions` builds the `TypeId` is recorded and mismatches
+///   panic; release builds perform no check.
 ///
 /// # Example
 ///
@@ -27,92 +42,88 @@ use std::marker::PhantomData;
 /// let s: String = unsafe { obj.into_inner() };
 /// assert_eq!(s, "hello world");
 /// ```
-#[repr(C)] // Ensures predictable memory layout for compatibility with raw pointers
+#[repr(C)]
 pub struct DynObj {
-    /// Pointer to the heap-allocated value.
-    ///
-    /// * Type is erased to `*mut ()` to hide the concrete type `T` in the struct.
-    /// * Must be cast back to the original type (`*mut T`) before dereferencing.
-    /// * Points to memory allocated by `Box::into_raw`.
-    data: *mut (),
+    data: Slot,
 
-    /// Type-erased destructor function pointer.
-    ///
-    /// * Stores a function that reconstructs the original `Box<T>` and drops it.
-    /// * Ensures proper cleanup of the heap-allocated value when `DynObj` is dropped.
-    drop: unsafe fn(*mut ()),
+    /// Destructor for `data`; `None` when nothing needs to run on drop.
+    drop: Option<unsafe fn(*mut Slot)>,
 
-    /// Stores the `TypeId` of the value in `data` for type safety checks.
-    ///
-    /// * Only included when `debug_assertions` is enabled (debug builds).
-    /// * Used to verify that the type `T` provided in `get`, `get_mut`, or `into_inner`
-    ///   matches the type used in `new`.
     #[cfg(debug_assertions)]
     tid: std::any::TypeId,
 
-    /// Marker to indicate ownership of a heap-allocated value.
-    ///
-    /// * `PhantomData<*mut ()>` informs the compiler that `DynObj` logically owns
-    ///   a heap-allocated value of some type, even though the type is erased.
-    /// * Ensures proper drop checking and conveys that the value is owned, not borrowed.
-    /// * Allows aliasing and moving, as the pointer is managed manually.
+    /// Owns an erased value: not `Send`/`Sync` by default (opted in below),
+    /// and `!Unpin`-agnostic like a raw pointer.
     _marker: PhantomData<*mut ()>,
+}
+
+unsafe fn drop_inline<T>(slot: *mut Slot) {
+    unsafe { ptr::drop_in_place(slot.cast::<T>()) }
+}
+
+unsafe fn drop_boxed<T>(slot: *mut Slot) {
+    unsafe { drop(Box::from_raw((*slot).assume_init().cast::<T>())) }
 }
 
 impl DynObj {
     /// Constructs a new `DynObj` that owns `val`.
     ///
-    /// * Moves the provided value `val` onto the heap using `Box`.
-    /// * Erases the type `T` at compile time, storing only a raw pointer and a destructor.
-    /// * The caller must remember the type `T` for later access via `get`, `get_mut`, or `into_inner`.
-    ///
-    /// # Constraints
-    /// * `T` must implement `Send` to ensure thread safety for the raw pointer.
-    /// * `T` must be `'static` to ensure no references to temporary data are stored.
+    /// Small values are stored inline; larger ones are moved to the heap.
     ///
     /// # Examples
     ///
     /// ```
     /// let boxed = extobj::DynObj::new(vec![1, 2, 3]);
+    /// let inline = extobj::DynObj::new(7u32);
     /// ```
+    #[inline]
     pub fn new<T>(val: T) -> Self
     where
         T: Send + Sync + 'static,
     {
-        // Allocate the value on the heap and convert to a raw pointer, erasing the type
-        let b = Box::into_raw(Box::new(val)) as *mut ();
+        let mut data = Slot::uninit();
 
-        /// Type-erased drop function for `T`.
-        ///
-        /// * Takes a raw pointer, casts it back to `*mut T`, and drops it as a `Box<T>`.
-        /// * Ensures proper cleanup of the heap-allocated value.
-        ///
-        /// # Safety
-        /// * `p` must be the same pointer returned by `Box::into_raw::<T>` during construction.
-        unsafe fn dropper<T>(p: *mut ()) {
-            unsafe {
-                // Reconstruct the `Box<T>` from the raw pointer and drop it
-                drop(Box::from_raw(p as *mut T));
-            }
-        }
+        let drop: Option<unsafe fn(*mut Slot)> = if is_inline::<T>() {
+            unsafe { data.as_mut_ptr().cast::<T>().write(val) };
+            needs_drop::<T>().then_some(drop_inline::<T> as unsafe fn(*mut Slot))
+        } else {
+            data.write(Box::into_raw(Box::new(val)).cast());
+            Some(drop_boxed::<T>)
+        };
 
         Self {
-            data: b,            // Store the raw pointer to the heap-allocated value
-            drop: dropper::<T>, // Store the type-specific drop function
+            data,
+            drop,
             #[cfg(debug_assertions)]
-            tid: std::any::TypeId::of::<T>(), // Store the TypeId for debug type checking
-            _marker: PhantomData, // Initialize the ownership marker
+            tid: std::any::TypeId::of::<T>(),
+            _marker: PhantomData,
         }
     }
 
-    /// Immutably borrows the contained value as a reference of type `T`.
-    ///
-    /// * Returns a reference to the heap-allocated value, cast to `&T`.
+    #[inline(always)]
+    fn check<T: 'static>(&self, _what: &str) {
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            self.tid,
+            std::any::TypeId::of::<T>(),
+            "Type mismatch in DynObj::{_what}"
+        );
+    }
+
+    /// Pointer to the stored `T`, wherever it lives.
+    #[inline(always)]
+    fn ptr<T>(&self) -> *mut T {
+        if is_inline::<T>() {
+            self.data.as_ptr().cast_mut().cast()
+        } else {
+            unsafe { self.data.assume_init() }.cast()
+        }
+    }
+
+    /// Immutably borrows the contained value as `&T`.
     ///
     /// # Safety
-    /// * The caller must ensure `T` matches the type used in `new`.
-    /// * Using the wrong type causes **undefined behavior**.
-    /// * In debug builds, a `TypeId` check ensures type safety; no check occurs in release builds.
+    /// `T` must be the type passed to `new`.
     ///
     /// # Examples
     ///
@@ -121,30 +132,19 @@ impl DynObj {
     /// let n: &u32 = unsafe { obj.get() };
     /// assert_eq!(*n, 42);
     /// ```
+    #[inline]
     pub unsafe fn get<T>(&self) -> &T
     where
         T: Send + 'static,
     {
-        // Check type safety in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            self.tid,
-            std::any::TypeId::of::<T>(),
-            "Type mismatch in DynObj::get"
-        );
-
-        // Cast the raw pointer to a reference of type `T` and return it
-        unsafe { &*(self.data as *const T) }
+        self.check::<T>("get");
+        unsafe { &*self.ptr::<T>() }
     }
 
-    /// Mutably borrows the contained value as a mutable reference of type `T`.
-    ///
-    /// * Returns a mutable reference to the heap-allocated value, cast to `&mut T`.
+    /// Mutably borrows the contained value as `&mut T`.
     ///
     /// # Safety
-    /// * Same requirements as `get`: the type `T` must match the type used in `new`.
-    /// * Using the wrong type causes **undefined behavior**.
-    /// * In debug builds, a `TypeId` check ensures type safety; no check in release builds.
+    /// `T` must be the type passed to `new`.
     ///
     /// # Examples
     ///
@@ -153,31 +153,19 @@ impl DynObj {
     /// let s: &mut String = unsafe { obj.get_mut() };
     /// s.push_str("!");
     /// ```
+    #[inline]
     pub unsafe fn get_mut<T>(&mut self) -> &mut T
     where
         T: Send + 'static,
     {
-        // Check type safety in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            self.tid,
-            std::any::TypeId::of::<T>(),
-            "Type mismatch in DynObj::get_mut"
-        );
-
-        // Cast the raw pointer to a mutable reference of type `T` and return it
-        unsafe { &mut *(self.data as *mut T) }
+        self.check::<T>("get_mut");
+        unsafe { &mut *self.ptr::<T>() }
     }
 
-    /// Consumes `DynObj` and returns the owned value of type `T`.
-    ///
-    /// * Moves the heap-allocated value back to the stack as type `T`.
-    /// * Prevents the `DynObj` destructor from running to avoid double-free.
+    /// Consumes `DynObj` and returns the owned `T`.
     ///
     /// # Safety
-    /// * Same requirements as `get`: the type `T` must match the type used in `new`.
-    /// * Using the wrong type causes **undefined behavior**.
-    /// * In debug builds, a `TypeId` check ensures type safety; no check in release builds.
+    /// `T` must be the type passed to `new`.
     ///
     /// # Examples
     ///
@@ -186,48 +174,34 @@ impl DynObj {
     /// let v: Vec<i32> = unsafe { obj.into_inner() };
     /// assert_eq!(v, [1, 2]);
     /// ```
+    #[inline]
     pub unsafe fn into_inner<T>(self) -> T
     where
         T: Send + 'static,
     {
-        // Check type safety in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            self.tid,
-            std::any::TypeId::of::<T>(),
-            "Type mismatch in DynObj::into_inner"
-        );
+        self.check::<T>("into_inner");
 
-        // Reconstruct the value from the raw pointer and move it to the stack
-        let out = unsafe { *Box::from_raw(self.data as *mut T) };
+        let out = if is_inline::<T>() {
+            unsafe { self.ptr::<T>().read() }
+        } else {
+            unsafe { *Box::from_raw(self.ptr::<T>()) }
+        };
 
-        // Prevent the destructor from running to avoid double-free
-        std::mem::forget(self);
-
+        // Ownership has been moved out; the destructor must not run.
+        mem::forget(self);
         out
     }
 }
 
-/// Implements the `Drop` trait to clean up the heap-allocated value.
-///
-/// * Calls the type-erased destructor stored in `self.drop` to free the memory.
 impl Drop for DynObj {
-    /// Runs the type-erased destructor stored in `self.drop`.
-    ///
-    /// # Safety
-    /// * The pointer `self.data` is guaranteed to be valid for the original
-    ///   type because `new` paired it with the correct `drop` function.
+    #[inline]
     fn drop(&mut self) {
-        // Call the stored destructor function with the raw pointer
-        unsafe { (self.drop)(self.data) }
+        if let Some(drop) = self.drop {
+            unsafe { drop(&mut self.data) }
+        }
     }
 }
 
-/// Marks `DynObj` as safe to send across threads.
-///
-/// * Safe because the value in `data` is required to implement `Send` in `new`.
-/// * The raw pointer and destructor function are thread-safe as long as the
-///   value itself is `Send`.
+// SAFETY: `new` requires `T: Send + Sync`, so the erased value is too.
 unsafe impl Send for DynObj {}
-
 unsafe impl Sync for DynObj {}
